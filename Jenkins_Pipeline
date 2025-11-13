@@ -2,18 +2,36 @@ pipeline {
     agent any
 
     environment {
-        REGISTRY       = 'microserviceacr.azurecr.io'    // ACR login server
-        RESOURCE_GROUP = 'devops-assignment-rg'          // Azure Resource Group
-        AKS_CLUSTER    = 'devops-aks'                    // AKS Cluster name
-        IMAGE_TAG      = "${env.BUILD_NUMBER}"           // Image tag per build
+        REGISTRY       = 'microserviceacr.azurecr.io'        // ACR login server
+        RESOURCE_GROUP = 'devops-assignment-rg'            // Azure Resource Group
+        AKS_CLUSTER    = 'devops-aks'                      // AKS Cluster name
+        IMAGE_TAG      = "${env.BUILD_NUMBER}"             // Image tag per build
         DOCKER_CREDENTIALS_ID = 'azure-docker-credentials' // Jenkins credentials ID for ACR
         AZURE_CREDENTIALS_ID  = 'azure-service-principal'  // Jenkins credentials ID for Azure login
+        SONAR_PROJECT_KEY     = 'microservices-project'    // SonarQube project key
+        SONAR_HOST_URL        = 'http://sonarqube:9000'    // SonarQube server URL
+        SONAR_CREDENTIALS_ID  = 'sonar-token'             // Jenkins credentials ID for SonarQube token
     }
 
     stages {
         stage('Checkout Code') {
             steps {
                 git branch: 'main', url: 'https://github.com/iamnkit/microservices-project.git'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withCredentials([string(credentialsId: "${SONAR_CREDENTIALS_ID}", variable: 'SONAR_TOKEN')]) {
+                    sh """
+                    echo "Running SonarQube scan..."
+                    sonar-scanner \
+                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=${SONAR_HOST_URL} \
+                        -Dsonar.login=$SONAR_TOKEN
+                    """
+                }
             }
         }
 
@@ -24,6 +42,17 @@ pipeline {
                     docker.build("user-service:${IMAGE_TAG}", './user-service')
                     docker.build("order-service:${IMAGE_TAG}", './order-service')
                     docker.build("api-gateway:${IMAGE_TAG}", './api-gateway')
+                }
+            }
+        }
+
+        stage('Trivy Vulnerability Scan') {
+            steps {
+                script {
+                    echo "Scanning Docker images with Trivy..."
+                    sh "trivy image --exit-code 1 ${REGISTRY}/user-service:${IMAGE_TAG}"
+                    sh "trivy image --exit-code 1 ${REGISTRY}/order-service:${IMAGE_TAG}"
+                    sh "trivy image --exit-code 1 ${REGISTRY}/api-gateway:${IMAGE_TAG}"
                 }
             }
         }
@@ -70,10 +99,10 @@ pipeline {
 
     post {
         success {
-            echo "All microservices deployed successfully to AKS: ${AKS_CLUSTER}"
+            echo "All microservices scanned, built, pushed, and deployed successfully!"
         }
         failure {
-            echo "Deployment failed! Check Jenkins logs for error details."
+            echo "Pipeline failed! Check logs for SonarQube, Trivy, Docker, or AKS errors."
         }
     }
 }
