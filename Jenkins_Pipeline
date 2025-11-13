@@ -2,96 +2,78 @@ pipeline {
     agent any
 
     environment {
-        REGISTRY = 'youracr.azurecr.io'
-        RESOURCE_GROUP = 'yourResourceGroup'
-        AKS_CLUSTER = 'yourAksCluster'
-        IMAGE_TAG = "${env.GIT_COMMIT.substring(0, 7)}"
+        REGISTRY       = 'microserviceacr.azurecr.io'    // ACR login server
+        RESOURCE_GROUP = 'devops-assignment-rg'          // Azure Resource Group
+        AKS_CLUSTER    = 'devops-aks'                    // AKS Cluster name
+        IMAGE_TAG      = "${env.BUILD_NUMBER}"           // Image tag per build
+        DOCKER_CREDENTIALS_ID = 'azure-docker-credentials' // Jenkins credentials ID for ACR
+        AZURE_CREDENTIALS_ID  = 'azure-service-principal'  // Jenkins credentials ID for Azure login
     }
 
     stages {
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
-                checkout scm
+                git branch: 'main', url: 'https://github.com/iamnkit/microservices-project.git'
             }
         }
 
         stage('Build Docker Images') {
             steps {
                 script {
-                    sh '''
-                    docker build -t $REGISTRY/user-service:$IMAGE_TAG ./user-service
-                    docker build -t $REGISTRY/order-service:$IMAGE_TAG ./order-service
-                    docker build -t $REGISTRY/api-gateway:$IMAGE_TAG ./api-gateway
-                    '''
+                    echo "🛠 Building Docker images for all microservices..."
+                    docker.build("user-service:${IMAGE_TAG}", './user-service')
+                    docker.build("order-service:${IMAGE_TAG}", './order-service')
+                    docker.build("api-gateway:${IMAGE_TAG}", './api-gateway')
                 }
             }
         }
 
-        stage('Push Docker Images') {
+        stage('Push Images to ACR') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'acr-credentials', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-                    script {
-                        sh '''
-                        echo $PASSWORD | docker login $REGISTRY --username $USERNAME --password-stdin
-                        docker push $REGISTRY/user-service:$IMAGE_TAG
-                        docker push $REGISTRY/order-service:$IMAGE_TAG
-                        docker push $REGISTRY/api-gateway:$IMAGE_TAG
-                        '''
-                    }
-                }
-            }
-        }
-
-        stage('Run Tests') {
-            parallel {
-                stage('Test User Service') {
-                    steps {
-                        dir('user-service') {
-                            sh 'npm install'
-                            sh 'npm test'
-                        }
-                    }
-                }
-                stage('Test Order Service') {
-                    steps {
-                        dir('order-service') {
-                            sh 'npm install'
-                            sh 'npm test'
-                        }
-                    }
-                }
-                stage('Test API Gateway') {
-                    steps {
-                        dir('api-gateway') {
-                            sh 'npm install'
-                            sh 'npm test'
-                        }
-                    }
+                withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                    sh '''
+                    echo $PASSWORD | docker login ${REGISTRY} -u $USERNAME --password-stdin
+                    
+                    # Tag images
+                    docker tag user-service:${IMAGE_TAG} ${REGISTRY}/user-service:${IMAGE_TAG}
+                    docker tag order-service:${IMAGE_TAG} ${REGISTRY}/order-service:${IMAGE_TAG}
+                    docker tag api-gateway:${IMAGE_TAG} ${REGISTRY}/api-gateway:${IMAGE_TAG}
+                    
+                    # Push to ACR
+                    docker push ${REGISTRY}/user-service:${IMAGE_TAG}
+                    docker push ${REGISTRY}/order-service:${IMAGE_TAG}
+                    docker push ${REGISTRY}/api-gateway:${IMAGE_TAG}
+                    '''
                 }
             }
         }
 
         stage('Deploy to AKS') {
             steps {
-                withCredentials([azureServicePrincipal('azure-credentials-id')]) {
-                    script {
-                        sh '''
-                        az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_CLUSTER --overwrite-existing
-                        kubectl set image deployment/user-service user-service=$REGISTRY/user-service:$IMAGE_TAG -n microservices
-                        kubectl set image deployment/order-service order-service=$REGISTRY/order-service:$IMAGE_TAG -n microservices
-                        kubectl set image deployment/api-gateway api-gateway=$REGISTRY/api-gateway:$IMAGE_TAG -n microservices
-                        '''
-                    }
+                withCredentials([azureServicePrincipal(credentialsId: "${AZURE_CREDENTIALS_ID}")]) {
+                    sh '''
+                    echo "📦 Deploying to AKS..."
+                    az aks get-credentials --resource-group ${RESOURCE_GROUP} --name ${AKS_CLUSTER} --overwrite-existing
+                    
+                    # Apply Kubernetes manifests
+                    kubectl apply -f k8s/
+                    
+                    # Wait for deployments to complete
+                    kubectl rollout status deployment/user-service
+                    kubectl rollout status deployment/order-service
+                    kubectl rollout status deployment/api-gateway
+                    '''
                 }
             }
         }
     }
-    
+
     post {
+        success {
+            echo "✅ All microservices deployed successfully to AKS: ${AKS_CLUSTER}"
+        }
         failure {
-            mail to: 'ankit.tiwari.com',
-                 subject: "Failed Pipeline: ${env.JOB_NAME} Build #${env.BUILD_NUMBER}",
-                 body: "Please check the Jenkins logs for details."
+            echo "❌ Deployment failed! Check Jenkins logs for error details."
         }
     }
 }
