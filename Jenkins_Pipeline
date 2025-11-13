@@ -52,7 +52,7 @@ pipeline {
             steps {
                 withCredentials([azureServicePrincipal(credentialsId: "${AZURE_CREDENTIALS_ID}")]) {
                     sh '''
-                    echo "📦 Deploying to AKS..."
+                    echo "Deploying to AKS..."
                     az aks get-credentials --resource-group ${RESOURCE_GROUP} --name ${AKS_CLUSTER} --overwrite-existing
                     
                     # Apply Kubernetes manifests
@@ -70,10 +70,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ All microservices deployed successfully to AKS: ${AKS_CLUSTER}"
+            echo "All microservices deployed successfully to AKS: ${AKS_CLUSTER}"
         }
         failure {
-            echo "❌ Deployment failed! Check Jenkins logs for error details."
+            echo "Deployment failed! Check Jenkins logs for error details."
         }
     }
 }
