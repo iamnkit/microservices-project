@@ -20,7 +20,7 @@ pipeline {
         stage('Build Docker Images') {
             steps {
                 script {
-                    echo "🛠 Building Docker images for all microservices..."
+                    echo "Building Docker images for all microservices..."
                     docker.build("user-service:${IMAGE_TAG}", './user-service')
                     docker.build("order-service:${IMAGE_TAG}", './order-service')
                     docker.build("api-gateway:${IMAGE_TAG}", './api-gateway')
