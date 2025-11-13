@@ -1,0 +1,97 @@
+pipeline {
+    agent any
+
+    environment {
+        REGISTRY = 'youracr.azurecr.io'
+        RESOURCE_GROUP = 'yourResourceGroup'
+        AKS_CLUSTER = 'yourAksCluster'
+        IMAGE_TAG = "${env.GIT_COMMIT.substring(0, 7)}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Images') {
+            steps {
+                script {
+                    sh '''
+                    docker build -t $REGISTRY/user-service:$IMAGE_TAG ./user-service
+                    docker build -t $REGISTRY/order-service:$IMAGE_TAG ./order-service
+                    docker build -t $REGISTRY/api-gateway:$IMAGE_TAG ./api-gateway
+                    '''
+                }
+            }
+        }
+
+        stage('Push Docker Images') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'acr-credentials', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                    script {
+                        sh '''
+                        echo $PASSWORD | docker login $REGISTRY --username $USERNAME --password-stdin
+                        docker push $REGISTRY/user-service:$IMAGE_TAG
+                        docker push $REGISTRY/order-service:$IMAGE_TAG
+                        docker push $REGISTRY/api-gateway:$IMAGE_TAG
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            parallel {
+                stage('Test User Service') {
+                    steps {
+                        dir('user-service') {
+                            sh 'npm install'
+                            sh 'npm test'
+                        }
+                    }
+                }
+                stage('Test Order Service') {
+                    steps {
+                        dir('order-service') {
+                            sh 'npm install'
+                            sh 'npm test'
+                        }
+                    }
+                }
+                stage('Test API Gateway') {
+                    steps {
+                        dir('api-gateway') {
+                            sh 'npm install'
+                            sh 'npm test'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to AKS') {
+            steps {
+                withCredentials([azureServicePrincipal('azure-credentials-id')]) {
+                    script {
+                        sh '''
+                        az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_CLUSTER --overwrite-existing
+                        kubectl set image deployment/user-service user-service=$REGISTRY/user-service:$IMAGE_TAG -n microservices
+                        kubectl set image deployment/order-service order-service=$REGISTRY/order-service:$IMAGE_TAG -n microservices
+                        kubectl set image deployment/api-gateway api-gateway=$REGISTRY/api-gateway:$IMAGE_TAG -n microservices
+                        '''
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        failure {
+            mail to: 'ankit.tiwari.com',
+                 subject: "Failed Pipeline: ${env.JOB_NAME} Build #${env.BUILD_NUMBER}",
+                 body: "Please check the Jenkins logs for details."
+        }
+    }
+}
