@@ -2,7 +2,24 @@ const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const app = express();
 
-app.use('/users', createProxyMiddleware({ target: 'http://user-service:3001', changeOrigin: true }));
-app.use('/orders', createProxyMiddleware({ target: 'http://order-service:3002', changeOrigin: true }));
+// Proxy /users to user-service (internal port 80)
+app.use('/users', createProxyMiddleware({
+  target: 'http://user-service:80',
+  pathRewrite: {'^/users' : ''},
+  changeOrigin: true
+}));
+
+// Proxy /orders to order-service (internal port 80)
+app.use('/orders', createProxyMiddleware({
+  target: 'http://order-service:80',
+  pathRewrite: {'^/orders' : ''},
+  changeOrigin: true
+}));
+
+// Basic error handler
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).send('Proxy error');
+}));
 
 app.listen(3000, () => console.log('API Gateway running on port 3000'));
