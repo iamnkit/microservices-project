@@ -1,13 +1,20 @@
-FROM node:16-alpine
+# Use official Python image
+FROM python:3.11-slim
 
+# Set working directory
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install --production
+# Copy requirements
+COPY requirements.txt .
 
-COPY . .
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-EXPOSE 3002
+# Copy source code
+COPY app.py .
 
-CMD ["node", "order-service.js"]
+# Expose port
+EXPOSE 8080
 
+# Run the application
+CMD ["python", "app.py"]
