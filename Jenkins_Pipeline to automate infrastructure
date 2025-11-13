@@ -1,0 +1,60 @@
+pipeline {
+    agent any
+
+    environment {
+        // Azure service principal credentials stored as Jenkins credentials
+        ARM_CLIENT_ID     = credentials('azure-client-id')
+        ARM_CLIENT_SECRET = credentials('azure-client-secret')
+        ARM_SUBSCRIPTION_ID = credentials('azure-subscription-id')
+        ARM_TENANT_ID     = credentials('azure-tenant-id')
+
+        // Terraform variables
+        TF_VAR_prefix             = "devops"
+        TF_VAR_location           = "eastus"
+        TF_VAR_resource_group_name = "rg-devops-assignment"
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                git url: 'https://github.com/iamnkit/microservices-project.git', branch: 'main'
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                sh 'terraform init'
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                sh 'terraform plan -out=tfplan'
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                // Manual approval before applying
+                input message: "Do you want to apply Terraform changes?", ok: "Apply"
+                sh 'terraform apply -auto-approve tfplan'
+            }
+        }
+
+        stage('Verify Resources') {
+            steps {
+                sh 'terraform show'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Terraform infrastructure applied successfully!"
+        }
+        failure {
+            echo "Terraform pipeline failed. Please check the logs."
+        }
+    }
+}
